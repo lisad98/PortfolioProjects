@@ -24,7 +24,7 @@ ORDER BY mpaa_total_gross
 
 --total gross vs inflation adjusted gross
 
-SELECT movie_title, total_gross, inflation_adjusted_gross
+SELECT genre, MAX(total_gross) AS genre_total_gross, MAX(inflation_adjusted_gross) AS genre_infl_gross
 FROM PortfolioProject.dbo.disney$
-ORDER BY movie_title
+GROUP BY genre
 
