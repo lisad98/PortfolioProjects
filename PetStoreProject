@@ -1,0 +1,19 @@
+CREATE TABLE pet_store (item_id INTEGER, item_name TEXT, price NUMERIC, aisle INTEGER, item_desc TEXT); 
+
+INSERT INTO pet_store VALUES (1, 'collars', 15, 2, 'clothes');
+INSERT INTO pet_store VALUES (2, 'treats', 5.99, 7, 'food');
+INSERT INTO pet_store VALUES (3, 'kibble', 20.50, 8, 'food');
+INSERT INTO pet_store VALUES (4, 'tennis balls', 10.50, 6, 'toys');
+INSERT INTO pet_store VALUES (5, 'cat litter', 15, 10, 'cleaning');
+INSERT INTO pet_store VALUES (6, 'harness', 11.99, 2, 'clothes');
+INSERT INTO pet_store VALUES (7, 'leash', 17, 2, 'clothes');
+INSERT INTO pet_store VALUES (8, 'wet food', 0.99, 8, 'food');
+INSERT INTO pet_store VALUES (9, 'shampoo', 6.50, 10, 'cleaning');
+INSERT INTO pet_store VALUES (10, 'cat tower', 67.99, 5, 'toys');
+INSERT INTO pet_store VALUES (11, 'clippers', 4, 11, 'cleaning');
+INSERT INTO pet_store VALUES (12, 'brush', 6.99, 11, 'cleaning');
+INSERT INTO pet_store VALUES (13, 'bed', 25, 6, 'toys');
+INSERT INTO pet_store VALUES (14, 'squeaker', 7, 6, 'toys');
+INSERT INTO pet_store VALUES (15, 'medicine', 24, 11, 'cleaning');
+
+SELECT * FROM pet_store ORDER BY price 
