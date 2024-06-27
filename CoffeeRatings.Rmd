@@ -1,0 +1,402 @@
+---
+title: "Coffee Rating Analysis - Lisa Hernandez"
+output: html_document
+date: "2024-06-21"
+editor_options: 
+  markdown: 
+    wrap: sentence
+---
+
+## Coffee Rating Analysis Using Bayesian Modeling
+
+### Lisa Hernandez 
+
+```{r}
+# Load packages
+library(bayesrules)
+library(tidyverse)
+library(rstan)
+library(rstanarm)
+library(bayesplot)
+library(tidybayes)
+library(janitor)
+library(broom.mixed)
+```
+
+```{r}
+#load the dataset
+data("coffee_ratings")
+coffee_ratings <- coffee_ratings %>% 
+  select(farm_name, total_cup_points, aroma, aftertaste)
+```
+
+### Getting started with coffee ratings
+
+Before doing any modeling, let’s get to know the coffee_ratings data.
+
+The coffee_ratings data includes ratings and features of 1339 different batches of beans grown on 571 different farms.
+
+Using this data to model ratings (total_cup_points) likely violates the independence assumption of the Bayesian linear regression model because there are several observations from each farm that could be related.
+Because of this, we will create a new data set that takes one observation per farm that way we can have independent variables for this analysis.
+
+```{r}
+head(coffee_ratings)
+```
+
+```{r}
+set.seed(84735)
+new_coffee <- coffee_ratings %>% 
+  group_by(farm_name) %>% 
+  sample_n(1) %>% 
+  ungroup()
+dim(new_coffee)
+```
+
+### Modeling Coffee Ratings - Bayesian Normal Regression Model
+
+Our data model is: Yi \| β0, β1, σ \~ind N(μi, σ\^2)
+
+And the priors of the parameters are: μi=β0+β1X
+
+β0\~N(m0,s2/0)
+
+β1\~N(m1,s2/1)
+
+σ \~Exp(l)
+
+I will use a coffee bean’s rating (Y) by its aroma grade (X) with μi=β0+β1X.
+In doing so, I assume that our only prior understanding is that the average cup of coffee has a 75-point rating, though this might be anywhere between 55 and 95.
+Beyond that, I will utilize weakly informative priors.
+
+This means β0 is most likely 75, with its 95% CI boundaries being 95 and 55.
+This further means that 2s0=20=\> s0=10.
+
+```{r}
+#plotting the relationship between total_cup_points and aroma
+ggplot(new_coffee, aes(y = total_cup_points, x = aroma)) + 
+  geom_point(size = 0.2) + 
+  geom_smooth(method = "lm", se = FALSE)
+```
+
+We can see from the graph that the total cup points and aroma have a linear relationship.
+This means that the higher the grade of coffee aroma, the higher the total cup points will be.
+
+Using stan_glm() to simulate the Normal regression posterior model.
+
+```{r}
+summary(new_coffee)
+```
+
+```{r}
+coffee_model <- stan_glm(total_cup_points ~ aroma, data = new_coffee,
+                       family = gaussian,
+                       prior_intercept = normal(75, 10, autoscale = TRUE),
+                       prior = normal(7.5, 0.5, autoscale = TRUE), 
+                       prior_aux = exponential(1, autoscale = TRUE),
+                       chains = 4, iter = 5000*2, seed = 84735)
+```
+
+*Providing visual and numerical posterior summaries for the `aroma` coefficient*.
+
+```{r}
+#prior
+summary(coffee_model)
+```
+
+```{r}
+prior_summary(coffee_model)
+```
+
+```{r}
+mcmc_trace(coffee_model)
+```
+
+```{r}
+mcmc_dens_overlay(coffee_model)
+```
+
+```{r}
+mcmc_acf(coffee_model, pars = c("(Intercept)", "aroma"))
+```
+
+We can see that all three sets of graphs shows a stable MCMC with each of the chains overlaping suggesting that each of them have come to about the same posterior probability which is close to zero.
+
+```{r}
+#simulating the posterior model
+coffee_model_posterior <- stan_glm(
+  formula = total_cup_points ~ aroma, data = new_coffee, 
+  family = gaussian,
+  prior_intercept = normal(75, 27, autoscale = TRUE),
+  prior = normal(7.5, 4.4, autoscale = TRUE), 
+  prior_aux = exponential(0.36, autoscale = TRUE),
+  chains = 4, 
+  iter = 5000*2, 
+  seed = 84735,
+  prior_PD = FALSE)
+```
+
+```{r}
+summary(coffee_model_posterior)
+```
+
+```{r}
+mcmc_trace(coffee_model_posterior, size = 0.1)
+
+mcmc_dens_overlay(coffee_model_posterior)
+```
+
+```{r}
+tidy(coffee_model_posterior, 
+     effects = c("fixed", "aux"),
+     conf.int = TRUE,
+     conf.level = 0.95) 
+```
+
+```{r}
+coffee_model_df <- as.data.frame(coffee_model_posterior)
+
+nrow(coffee_model_df)
+head(coffee_model_df, 3)
+```
+
+Providing visual and numerical posterior summaries for the aroma coefficient β1.
+
+```{r}
+pp_check(coffee_model_posterior, nreps = 10) +
+  xlab("aroma")
+```
+
+The graph shows that there is some inconsistencies between the observed and simulated values between total_cup_points and aroma.
+This is likely because of the parameters that were computed.
+
+```{r}
+summary(coffee_model_posterior)
+```
+
+```{r}
+#posterior values
+coffee_model_posterior
+```
+
+```{r}
+new_coffee %>%
+  add_fitted_draws(coffee_model_posterior, n = 100) %>%
+  ggplot(aes(y = total_cup_points, x = aroma)) +
+    geom_line(aes(y = .value, group = .draw), alpha = 0.15)
+```
+
+From the summary and the graph above, we can conclude that there is significant posterior evidence in order to proceed that the better a coffee bean’s aroma, the higher its rating tends to be.
+The Rhat values are 1.0 meaning that the posterior PDFs are stable and based on the observed mean of aroma being significantly larger than zero.
+
+### Coffee Ratings: Is it wrong?
+
+Before we put too much stock into the regression analysis, we will step back and consider whether it’s wrong.
+
+The posterior simulation contains multiple sets of posterior plausible parameter sets, (β0,β1,σ).
+We will use the first of these to simulate a sample of 572 new coffee ratings from the observed aroma grades.
+
+```{r}
+first_set <- head(coffee_model_df, 1)
+first_set
+```
+
+```{r}
+beta_0 <- first_set$`(Intercept)`
+beta_1 <- first_set$aroma
+sigma  <- first_set$sigma
+set.seed(84735)
+one_simulation <- new_coffee %>% 
+  mutate(mu = beta_0 + beta_1 * aroma,
+         simulated_points = rnorm(572, mean = mu, sd = sigma)) %>% 
+  select(aroma, total_cup_points, simulated_points)
+```
+
+```{r}
+head(one_simulation, 2)
+```
+
+Next we will construct a density plot of the simulated sample and superimpose this with a density plot of the actual observed total_cup_points data.
+
+```{r}
+ggplot(one_simulation, aes(x = simulated_points)) + 
+  geom_density(color = "lightblue") + 
+  geom_density(aes(x = total_cup_points), color = "darkblue")
+```
+
+The simulated points seem to have less of a density that the original data points, though it does seem to have semi-similar spread.
+
+we will use pp_check() to implement a more complete posterior predictive check.
+
+```{r}
+pp_check(coffee_model_posterior, nreps = 50) + 
+  xlab("total_cup_points")
+```
+
+I would count this model as reasonable because the predictions get a decent capture of the total cup points with the form of the graph, even though the density seems to be a bit different.
+
+### Coffee ratings: Are the posterior predictions accurate? 
+
+Next, let’s explore how well our posterior model predicts coffee bean ratings.
+
+The first batch of coffee beans in new_coffee has an aroma grade of 7.67.
+We will simulate and plot a posterior predictive model for the rating of this batch.
+
+```{r}
+new_coffee %>% 
+  filter(aroma == "7.67") %>% 
+  select(total_cup_points)
+```
+
+```{r}
+set.seed(84735)
+predict_767 <- coffee_model_df %>% 
+  mutate(mu = `(Intercept)` + aroma*7.67,
+         y_new = rnorm(20000, mean = mu, sd = sigma))
+
+# Plot the posterior predictive model
+ggplot(predict_767, aes(x = y_new)) + 
+  geom_density()
+```
+
+This batch of beans had a rating of 84.
+Now we will calculate and interpret two measures of the posterior predictive error for this batch: both the raw and standardized error.
+
+```{r}
+predict_767 %>% 
+  summarize(mean = mean(y_new), error = 84 - mean(y_new))
+```
+
+```{r}
+predict_767 %>% 
+  summarize(sd = sd(y_new), error = 84 - mean(y_new),
+            error_scaled = error / sd(y_new))
+```
+
+To get a sense of the posterior predictive accuracy for all batches in new_coffee, we will construct and discuss a ppc_intervals() plot.
+
+```{r}
+set.seed(84735)
+predictions <- posterior_predict(coffee_model_posterior, newdata = new_coffee)
+dim(predictions)
+```
+
+```{r}
+ppc_intervals(new_coffee$total_cup_points, yrep = predictions, x = new_coffee$aroma, 
+              prob = 0.5, prob_outer = 0.95)
+```
+
+As the aroma grading gets higher we can see that the y points are on the y rep scale.
+
+```{r}
+set.seed(84735)
+prediction_summary(coffee_model_posterior, data = new_coffee)
+```
+
+It looks like 68.9% of the batches remain in the 50% prediction interval.
+
+### Coffee ratings Now with Aftertaste!
+
+Aroma isn’t the only possible predictor of a coffee bean’s rating.
+What if, instead, we were to predict rating by a bean’s aftertaste?
+In exploring this relationship, we will continue to utilize the same prior models.
+
+Using stan_glm() to simulate the Normal regression posterior model of total_cup_points by aftertaste.
+
+```{r}
+summary(new_coffee)
+```
+
+```{r}
+coffee_model2 <- stan_glm(total_cup_points ~ aftertaste, data = new_coffee,
+                       family = gaussian,
+                       prior_intercept = normal(75, 10, autoscale = TRUE),
+                       prior = normal(7.3, 0.1, autoscale = TRUE), 
+                       prior_aux = exponential(1, autoscale = TRUE),
+                       chains = 4, iter = 5000*2, seed = 84735)
+```
+
+```{r}
+prior_summary(coffee_model2)
+```
+
+```{r}
+coffee_model_posterior2 <- stan_glm(
+  formula = total_cup_points ~ aftertaste, data = new_coffee, 
+  family = gaussian,
+  prior_intercept = normal(75, 27, autoscale = TRUE),
+  prior = normal(7.3, 0.81, autoscale = TRUE), 
+  prior_aux = exponential(0.36, autoscale = TRUE),
+  chains = 4, 
+  iter = 5000*2, 
+  seed = 84735,
+  prior_PD = FALSE)
+```
+
+```{r}
+summary(coffee_model_posterior2)
+```
+
+```{r}
+tidy(coffee_model_posterior2, 
+     effects = c("fixed", "aux"),
+     conf.int = TRUE,
+     conf.level = 0.95) 
+```
+
+```{r}
+coffee_model_df2 <- as.data.frame(coffee_model_posterior2)
+
+nrow(coffee_model_df2)
+head(coffee_model_df2, 3)
+```
+
+Producing a quick plot to determine whether this model is wrong.
+
+```{r}
+ggplot(new_coffee, aes(y = total_cup_points, x = aftertaste)) + 
+  geom_point(size = 0.2) + 
+  geom_smooth(method = "lm", se = FALSE)
+```
+
+```{r}
+first_set <- head(coffee_model_df2, 1)
+first_set
+```
+
+```{r}
+beta_0 <- first_set$`(Intercept)`
+beta_1 <- first_set$aftertaste
+sigma  <- first_set$sigma
+set.seed(84735)
+one_simulation2 <- new_coffee %>% 
+  mutate(mu = beta_0 + beta_1 * aftertaste,
+         simulated_points = rnorm(572, mean = mu, sd = sigma)) %>% 
+  select(aftertaste, total_cup_points, simulated_points)
+```
+
+```{r}
+ggplot(one_simulation2, aes(x = simulated_points)) + 
+  geom_density(color = "lightblue") + 
+  geom_density(aes(x = total_cup_points), color = "darkblue")
+```
+
+```{r}
+pp_check(coffee_model_posterior2, nreps = 50) + 
+  xlab("total_cup_points")
+```
+
+This model is not wrong as the predictions follows the original points well.
+
+Now we will obtain 10-fold cross-validated measurements of this model’s posterior predictive quality.
+
+```{r}
+set.seed(84735)
+cv_procedure <- prediction_summary_cv(
+  model = coffee_model_posterior2, data = new_coffee, k = 10)
+```
+
+```{r}
+cv_procedure$folds
+```
+
+Putting it all together, I would pick the aftertaste as a useful predictor because looking at the graphs we can see that the predictions follow the original data set better than aroma does.
